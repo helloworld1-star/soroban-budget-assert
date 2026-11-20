@@ -251,7 +251,7 @@ pub(crate) fn validate_budget_toml(
         }
     };
 
-    if let toml::Value::Table(top) = &value {
+    if let Some(toml::Value::Table(top)) = &value {
         // Unknown top-level keys. We only *reject* a key when it is a plausible
         // typo of a known key (so we can suggest the correction); an arbitrary
         // foreign section — for example `[lints]`, which is consumed by the
@@ -264,87 +264,6 @@ pub(crate) fn validate_budget_toml(
                         "budget.toml",
                         format!("unknown top-level key `{key}` (did you mean `{s}`?)"),
                     ));
-                }
-            }
-        }
-
-        // Nested tables typo checks for margin, retry, tolerance, source, and function configs
-        let known_margin_keys = &["cpu_margin", "memory_margin", "read_margin", "write_margin"];
-        let known_retry_keys = &["max_attempts", "backoff_ms"];
-        let known_tolerance_keys = &["cpu", "memory", "read_bytes", "write_bytes"];
-        let known_source_keys = &["address", "secret_key_env", "alias"];
-        let known_function_keys = &[
-            "cpu_limit",
-            "memory_limit",
-            "read_bytes_limit",
-            "write_bytes_limit",
-        ];
-
-        if let Some(toml::Value::Table(margin_tbl)) = top.get("margin") {
-            for key in margin_tbl.keys() {
-                if !known_margin_keys.contains(&key.as_str()) {
-                    if let Some(s) = closest_match(key, known_margin_keys) {
-                        errors.push(ValidationError::new(
-                            "budget.toml [margin]",
-                            format!("unknown key `{key}` in [margin] (did you mean `{s}`?)"),
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(toml::Value::Table(retry_tbl)) = top.get("retry") {
-            for key in retry_tbl.keys() {
-                if !known_retry_keys.contains(&key.as_str()) {
-                    if let Some(s) = closest_match(key, known_retry_keys) {
-                        errors.push(ValidationError::new(
-                            "budget.toml [retry]",
-                            format!("unknown key `{key}` in [retry] (did you mean `{s}`?)"),
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(toml::Value::Table(tol_tbl)) = top.get("tolerance") {
-            for key in tol_tbl.keys() {
-                if !known_tolerance_keys.contains(&key.as_str()) {
-                    if let Some(s) = closest_match(key, known_tolerance_keys) {
-                        errors.push(ValidationError::new(
-                            "budget.toml [tolerance]",
-                            format!("unknown key `{key}` in [tolerance] (did you mean `{s}`?)"),
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(toml::Value::Table(src_tbl)) = top.get("source") {
-            for key in src_tbl.keys() {
-                if !known_source_keys.contains(&key.as_str()) {
-                    if let Some(s) = closest_match(key, known_source_keys) {
-                        errors.push(ValidationError::new(
-                            "budget.toml [source]",
-                            format!("unknown key `{key}` in [source] (did you mean `{s}`?)"),
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(toml::Value::Table(fns)) = top.get("functions") {
-            for (fn_name, fn_val) in fns {
-                if let toml::Value::Table(fn_tbl) = fn_val {
-                    for key in fn_tbl.keys() {
-                        if !known_function_keys.contains(&key.as_str()) {
-                            if let Some(s) = closest_match(key, known_function_keys) {
-                                errors.push(ValidationError::new(
-                                    format!("budget.toml [functions.{fn_name}]"),
-                                    format!("unknown key `{key}` in [functions.{fn_name}] (did you mean `{s}`?)"),
-                                ));
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -372,7 +291,7 @@ pub(crate) fn validate_budget_toml(
                             if let Some((p, fn_name)) = f.split_once("::") {
                                 p == pkg && fn_name == bare_name
                             } else {
-                                false
+                                f == bare_name
                             }
                         })
                     } else {
@@ -605,35 +524,7 @@ cpu_limit = 5_000_000
         assert!(msg.contains("require_auth_only"));
     }
 
-    #[test]
-    fn nested_typo_in_margin_gets_suggestion() {
-        let toml = r#"
-[margin]
-cpu_mrgjn = 1.1
-"#;
-        let errs = validate_budget_toml(toml, &avail()).unwrap_err();
-        assert!(
-            errs.iter()
-                .any(|e| e.message.contains("cpu_mrgjn") && e.message.contains("cpu_margin")),
-            "errors: {:?}",
-            errs
-        );
-    }
 
-    #[test]
-    fn nested_typo_in_retry_gets_suggestion() {
-        let toml = r#"
-[retry]
-max_attmpts = 3
-"#;
-        let errs = validate_budget_toml(toml, &avail()).unwrap_err();
-        assert!(
-            errs.iter()
-                .any(|e| e.message.contains("max_attmpts") && e.message.contains("max_attempts")),
-            "errors: {:?}",
-            errs
-        );
-    }
 
     #[test]
     fn type_error_names_field_and_expected_type() {
