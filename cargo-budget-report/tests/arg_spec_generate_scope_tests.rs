@@ -1,11 +1,7 @@
-//! Integration tests for issue #1025:
-//! Validate that `generate = true` is only used on `address` arguments in `arg_spec.rs`,
-//! returning an error naming the argument and type if applied elsewhere.
+use arg_spec::{render_args, ArgSpec, TypedArg};
 
 #[path = "../src/arg_spec.rs"]
 mod arg_spec;
-
-use arg_spec::{render_args, ArgSpec, TypedArg};
 
 #[test]
 fn test_generate_rejected_on_scalar_and_complex_types() {

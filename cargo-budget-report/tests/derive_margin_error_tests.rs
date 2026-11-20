@@ -172,3 +172,42 @@ fn derive_succeeds_with_a_complete_cli_margin_set() {
         "a complete margin set must produce the limits artifact"
     );
 }
+
+#[test]
+fn derive_fails_on_unknown_metric_label_in_report() {
+    let dir = tempfile::tempdir().expect("failed to create tempdir");
+    let out = dir.path().join("tier-a-limits.env");
+    let bad_report = dir.path().join("bad_report.json");
+    std::fs::write(
+        &bad_report,
+        serde_json::to_string(&serde_json::json!([
+            {
+                "package": "amm-pool-contract",
+                "function": "swap",
+                "metric": "UnknownMetric",
+                "value": 1000
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let assert = derive_cmd(dir.path())
+        .args(["budget-report", "--derive-limits"])
+        .arg(&out)
+        .args(["--from"])
+        .arg(&bad_report)
+        .args(full_margin_args())
+        .assert();
+
+    let output = assert.failure().get_output().clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("UnknownMetric"),
+        "error must name the unknown metric label, got: {stderr}"
+    );
+    assert!(
+        !out.exists(),
+        "derivation must not succeed or write output when an unknown metric label is encountered"
+    );
+}

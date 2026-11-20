@@ -249,7 +249,7 @@ impl Derivation {
         measurements: &[TierBMeasurement],
         config: &DerivationConfig,
     ) -> Result<Self> {
-        let (per_function, raw_measurements) = Self::collect_measurements(measurements, config);
+        let (per_function, raw_measurements) = Self::collect_measurements(measurements, config)?;
         let mut limits = Self::derive_function_limits(&per_function, &raw_measurements, config);
         Self::derive_scenario_limits(&mut limits, &raw_measurements, config)?;
 
@@ -263,11 +263,19 @@ impl Derivation {
     fn collect_measurements(
         measurements: &[TierBMeasurement],
         config: &DerivationConfig,
-    ) -> (FunctionMetricMap, RawMetricMap) {
+    ) -> Result<(FunctionMetricMap, RawMetricMap)> {
         let mut per_function: FunctionMetricMap = BTreeMap::new();
         let mut raw_measurements: RawMetricMap = BTreeMap::new();
 
         for m in measurements {
+            if config.margin.for_metric(&m.metric).is_none() {
+                return Err(Error::Message(format!(
+                    "unsupported metric label {:?} for function {}::{}; expected one of 'CPU Instructions', 'Memory Bytes', 'Read Bytes', 'Write Bytes'",
+                    m.metric,
+                    m.package,
+                    m.function
+                )));
+            }
             let margin = match config.margin.for_metric(&m.metric) {
                 Some(m) => m,
                 None => continue,
@@ -284,7 +292,7 @@ impl Derivation {
             );
         }
 
-        (per_function, raw_measurements)
+        Ok((per_function, raw_measurements))
     }
 
     /// Derive function-level Tier A limits from collected measurement maps.
@@ -491,7 +499,7 @@ impl Derivation {
 /// survives both shell- and `.env`-style parsing cleanly, while a
 /// single-colon (`::`) separator collides with shell PATH semantics.
 fn env_var_key(package: &str, function: &str, metric_label: &str) -> String {
-    let metric_segment = metric_to_env_segment(metric_label);
+    let metric_segment = metric_to_env_segment(metric_label).unwrap_or("UNKNOWN");
     let pkg = package.replace('-', "_").to_ascii_uppercase();
     let fn_ = function.to_ascii_uppercase();
     // Scenario keys use the same prefix with `SCENARIO__<name>`; for
@@ -506,19 +514,21 @@ fn env_var_key(package: &str, function: &str, metric_label: &str) -> String {
 }
 
 fn env_var_scenario_key(package: &str, scenario: &str, metric_label: &str) -> String {
-    let metric_segment = metric_to_env_segment(metric_label);
+    let metric_segment = metric_to_env_segment(metric_label).unwrap_or("UNKNOWN");
     let pkg = package.replace('-', "_").to_ascii_uppercase();
     let scenario_u = scenario.to_ascii_uppercase();
     format!("TIER_A__{pkg}__SCENARIO__{scenario_u}__{metric_segment}")
 }
 
-fn metric_to_env_segment(metric_label: &str) -> &'static str {
+fn metric_to_env_segment(metric_label: &str) -> Result<&'static str> {
     match metric_label {
-        "CPU Instructions" => "CPU",
-        "Memory Bytes" | "Memory bytes" | "memory_bytes" => "MEM",
-        "Read Bytes" => "READ",
-        "Write Bytes" => "WRITE",
-        _ => "UNKNOWN",
+        "CPU Instructions" => Ok("CPU"),
+        "Memory Bytes" | "Memory bytes" | "memory_bytes" => Ok("MEM"),
+        "Read Bytes" => Ok("READ"),
+        "Write Bytes" => Ok("WRITE"),
+        _ => Err(Error::Message(format!(
+            "unknown metric label: {metric_label}"
+        ))),
     }
 }
 
@@ -737,23 +747,18 @@ mod tests {
     }
 
     #[test]
-    fn derive_unknown_metric_is_skipped_silently() {
+    fn derive_unknown_metric_fails_explicitly() {
         let measurements = vec![TierBMeasurement {
             package: "p".to_string(),
             function: "f".to_string(),
             metric: "WASM Bytes".to_string(),
             value: 12_345,
         }];
-        // WASM Bytes has no configured margin (it's a build artifact,
-        // not a runtime resource). The derive step skips it rather than
-        // erroring so --derive-limits works on real Tier B reports.
         let config = DerivationConfig::margin_only(margin());
-        let result = Derivation::from_report(&measurements, &config)
-            .expect("should not error on WASM Bytes");
-        assert!(
-            result.limits.is_empty(),
-            "WASM Bytes should produce no Tier A limits"
-        );
+        let err = Derivation::from_report(&measurements, &config).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("WASM Bytes"), "error must name unsupported metric, got: {msg}");
+        assert!(msg.contains("p::f"), "error must name function and package, got: {msg}");
     }
 
     #[test]
@@ -845,17 +850,12 @@ mod tests {
 
     #[test]
     fn metric_to_env_segment_handles_label_variants() {
-        assert_eq!(metric_to_env_segment("CPU Instructions"), "CPU");
-        assert_eq!(metric_to_env_segment("Memory Bytes"), "MEM");
-        assert_eq!(metric_to_env_segment("memory_bytes"), "MEM");
-        assert_eq!(metric_to_env_segment("Read Bytes"), "READ");
-        assert_eq!(metric_to_env_segment("Write Bytes"), "WRITE");
-        // Unknown metrics keep their literal segment — emitting a key
-        // would still be useful for callers to grep, but the parser
-        // for the env form will skip unknown metrics so the value is
-        // effectively ignored at test runtime. Better than silently
-        // dropping a metric with no warning.
-        assert_eq!(metric_to_env_segment("WASM Bytes"), "UNKNOWN");
+        assert_eq!(metric_to_env_segment("CPU Instructions").unwrap(), "CPU");
+        assert_eq!(metric_to_env_segment("Memory Bytes").unwrap(), "MEM");
+        assert_eq!(metric_to_env_segment("memory_bytes").unwrap(), "MEM");
+        assert_eq!(metric_to_env_segment("Read Bytes").unwrap(), "READ");
+        assert_eq!(metric_to_env_segment("Write Bytes").unwrap(), "WRITE");
+        assert!(metric_to_env_segment("WASM Bytes").is_err());
     }
 
     #[test]

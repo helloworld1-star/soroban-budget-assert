@@ -268,6 +268,104 @@ pub(crate) fn validate_budget_toml(
             }
         }
 
+        // Nested tables typo checks for margin, retry, tolerance, source, and function configs
+        let known_margin_keys = &[
+            "cpu_margin",
+            "memory_margin",
+            "read_margin",
+            "write_margin",
+        ];
+        let known_retry_keys = &[
+            "max_attempts",
+            "backoff_ms",
+        ];
+        let known_tolerance_keys = &[
+            "cpu",
+            "memory",
+            "read_bytes",
+            "write_bytes",
+        ];
+        let known_source_keys = &[
+            "address",
+            "secret_key_env",
+            "alias",
+        ];
+        let known_function_keys = &[
+            "cpu_limit",
+            "memory_limit",
+            "read_bytes_limit",
+            "write_bytes_limit",
+        ];
+
+        if let Some(toml::Value::Table(margin_tbl)) = top.get("margin") {
+            for key in margin_tbl.keys() {
+                if !known_margin_keys.contains(&key.as_str()) {
+                    if let Some(s) = closest_match(key, known_margin_keys) {
+                        errors.push(ValidationError::new(
+                            "budget.toml [margin]",
+                            format!("unknown key `{key}` in [margin] (did you mean `{s}`?)"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(toml::Value::Table(retry_tbl)) = top.get("retry") {
+            for key in retry_tbl.keys() {
+                if !known_retry_keys.contains(&key.as_str()) {
+                    if let Some(s) = closest_match(key, known_retry_keys) {
+                        errors.push(ValidationError::new(
+                            "budget.toml [retry]",
+                            format!("unknown key `{key}` in [retry] (did you mean `{s}`?)"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(toml::Value::Table(tol_tbl)) = top.get("tolerance") {
+            for key in tol_tbl.keys() {
+                if !known_tolerance_keys.contains(&key.as_str()) {
+                    if let Some(s) = closest_match(key, known_tolerance_keys) {
+                        errors.push(ValidationError::new(
+                            "budget.toml [tolerance]",
+                            format!("unknown key `{key}` in [tolerance] (did you mean `{s}`?)"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(toml::Value::Table(src_tbl)) = top.get("source") {
+            for key in src_tbl.keys() {
+                if !known_source_keys.contains(&key.as_str()) {
+                    if let Some(s) = closest_match(key, known_source_keys) {
+                        errors.push(ValidationError::new(
+                            "budget.toml [source]",
+                            format!("unknown key `{key}` in [source] (did you mean `{s}`?)"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(toml::Value::Table(fns)) = top.get("functions") {
+            for (fn_name, fn_val) in fns {
+                if let toml::Value::Table(fn_tbl) = fn_val {
+                    for key in fn_tbl.keys() {
+                        if !known_function_keys.contains(&key.as_str()) {
+                            if let Some(s) = closest_match(key, known_function_keys) {
+                                errors.push(ValidationError::new(
+                                    format!("budget.toml [functions.{fn_name}]"),
+                                    format!("unknown key `{key}` in [functions.{fn_name}] (did you mean `{s}`?)"),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Function existence: every key under `[functions.*]` must be an
         // exported function of the workspace. Skipped when we have no exported
         // functions to compare against (e.g. nothing was built).
@@ -282,11 +380,22 @@ pub(crate) fn validate_budget_toml(
                 let known: HashSet<&str> = available_functions.iter().map(String::as_str).collect();
                 let mut hint: Option<(Vec<&str>, String)> = None;
                 for name in fns.keys() {
-                    let bare_name = name
-                        .split_once("::")
-                        .map(|(_, f)| f)
-                        .unwrap_or(name.as_str());
-                    if known.contains(bare_name) {
+                    let (pkg_prefix, bare_name) = match name.split_once("::") {
+                        Some((pkg, func)) => (Some(pkg), func),
+                        None => (None, name.as_str()),
+                    };
+                    let exists = if let Some(pkg) = pkg_prefix {
+                        available_functions.iter().any(|f| {
+                            if let Some((p, fn_name)) = f.split_once("::") {
+                                p == pkg && fn_name == bare_name
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        known.contains(bare_name)
+                    };
+                    if exists {
                         continue;
                     }
                     let (candidate_list, avail_list) = hint.get_or_insert_with(|| {
@@ -514,13 +623,30 @@ cpu_limit = 5_000_000
     }
 
     #[test]
-    fn nested_typo_in_function_reports_schema_error() {
-        // `cpu_lmit` is a misspelling of `cpu_limit`; FunctionConfig denies
-        // unknown fields, so this surfaces as a schema error naming the field.
-        let toml = "[functions.do_expensive_work]\ncpu_lmit = 5_000_000\n";
+    fn nested_typo_in_margin_gets_suggestion() {
+        let toml = r#"
+[margin]
+cpu_mrgjn = 1.1
+"#;
         let errs = validate_budget_toml(toml, &avail()).unwrap_err();
         assert!(
-            errs.iter().any(|e| e.message.contains("cpu_lmit")),
+            errs.iter()
+                .any(|e| e.message.contains("cpu_mrgjn") && e.message.contains("cpu_margin")),
+            "errors: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn nested_typo_in_retry_gets_suggestion() {
+        let toml = r#"
+[retry]
+max_attmpts = 3
+"#;
+        let errs = validate_budget_toml(toml, &avail()).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| e.message.contains("max_attmpts") && e.message.contains("max_attempts")),
             "errors: {:?}",
             errs
         );
