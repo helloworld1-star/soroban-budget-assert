@@ -269,27 +269,10 @@ pub(crate) fn validate_budget_toml(
         }
 
         // Nested tables typo checks for margin, retry, tolerance, source, and function configs
-        let known_margin_keys = &[
-            "cpu_margin",
-            "memory_margin",
-            "read_margin",
-            "write_margin",
-        ];
-        let known_retry_keys = &[
-            "max_attempts",
-            "backoff_ms",
-        ];
-        let known_tolerance_keys = &[
-            "cpu",
-            "memory",
-            "read_bytes",
-            "write_bytes",
-        ];
-        let known_source_keys = &[
-            "address",
-            "secret_key_env",
-            "alias",
-        ];
+        let known_margin_keys = &["cpu_margin", "memory_margin", "read_margin", "write_margin"];
+        let known_retry_keys = &["max_attempts", "backoff_ms"];
+        let known_tolerance_keys = &["cpu", "memory", "read_bytes", "write_bytes"];
+        let known_source_keys = &["address", "secret_key_env", "alias"];
         let known_function_keys = &[
             "cpu_limit",
             "memory_limit",

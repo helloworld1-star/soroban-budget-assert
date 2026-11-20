@@ -757,8 +757,14 @@ mod tests {
         let config = DerivationConfig::margin_only(margin());
         let err = Derivation::from_report(&measurements, &config).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("WASM Bytes"), "error must name unsupported metric, got: {msg}");
-        assert!(msg.contains("p::f"), "error must name function and package, got: {msg}");
+        assert!(
+            msg.contains("WASM Bytes"),
+            "error must name unsupported metric, got: {msg}"
+        );
+        assert!(
+            msg.contains("p::f"),
+            "error must name function and package, got: {msg}"
+        );
     }
 
     #[test]
