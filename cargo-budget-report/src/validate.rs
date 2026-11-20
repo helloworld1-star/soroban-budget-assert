@@ -524,8 +524,6 @@ cpu_limit = 5_000_000
         assert!(msg.contains("require_auth_only"));
     }
 
-
-
     #[test]
     fn type_error_names_field_and_expected_type() {
         let toml = "[functions.do_expensive_work]\ncpu_limit = \"high\"\n";
